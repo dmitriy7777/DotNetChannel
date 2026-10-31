@@ -1,0 +1,13 @@
+services:
+  channel:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./settings.local.json:/app/settings.local.json:ro
+      - ./prompts:/app/prompts:ro
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

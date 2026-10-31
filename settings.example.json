@@ -1,0 +1,13 @@
+{
+  "SourceChannel": "NetDeveloperDiary",
+  "BotToken": "",
+  "AdminUserId": 0,
+  "TargetChannel": "",
+  "OpenAiKey": "",
+  "Model": "",
+  "PollSeconds": 120,
+  "MaxDraftsPerDay": 3,
+  "AutoPublish": false,
+  "DataDirectory": "data",
+  "PromptFile": "prompts/rewrite.txt"
+}

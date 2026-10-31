@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+settings.local.json
+data/
+publish/
+.env
+TestResults/
