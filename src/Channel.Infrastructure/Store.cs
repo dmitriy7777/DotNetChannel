@@ -7,8 +7,10 @@ namespace Channel.Infrastructure;
 public sealed class Store
 {
     private readonly string connectionString;
+    private readonly string dataDirectory;
     public Store(string directory)
     {
+        dataDirectory = directory;
         Directory.CreateDirectory(directory);
         connectionString = new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "channel.db"), DefaultTimeout = 10 }.ToString();
         Execute("PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY, state TEXT NOT NULL, payload TEXT NOT NULL, error TEXT); CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);");
@@ -20,12 +22,14 @@ public sealed class Store
         foreach (var (k,v) in args) cmd.Parameters.AddWithValue(k, v ?? DBNull.Value);
         return cmd.ExecuteNonQuery();
     }
+    public string BeginUsage(long postId, int revision, string model) => UsageLedger.Begin(dataDirectory, postId, revision, model);
+    public void CompleteUsage(string id, AiUsageReport report) => UsageLedger.Complete(dataDirectory, id, report);
     public string? Get(string key)
     {
         using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT value FROM meta WHERE key=$key"; cmd.Parameters.AddWithValue("$key", key); return cmd.ExecuteScalar() as string;
     }
     public void Set(string key, string value) => Execute("INSERT INTO meta VALUES($k,$v) ON CONFLICT(key) DO UPDATE SET value=$v", ("$k", key), ("$v", value));
-    public void Add(SourcePost source, string state = "Pending") => Execute("INSERT OR IGNORE INTO posts VALUES($id,$state,$data,NULL)", ("$id", source.Id), ("$state", state), ("$data", JsonSerializer.Serialize(new Draft(source))));
+    public bool Add(SourcePost source, string state = "Pending") => Execute("INSERT OR IGNORE INTO posts VALUES($id,$state,$data,NULL)", ("$id", source.Id), ("$state", state), ("$data", JsonSerializer.Serialize(new Draft(source)))) == 1;
     public StoredDraft? Find(long id) => List().FirstOrDefault(x => x.Id == id);
     public List<StoredDraft> List()
     {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Channel Studio"
+  short_description: "Create and extend AI-edited Telegram channels"
+  default_prompt: "Use $telegram-channel-studio to create or continue a Telegram editorial channel project, using its local handoff when available."

@@ -1,13 +1,13 @@
 namespace Channel.Core;
 
-public record SourcePost(long Id, string Url, string Text, string[] Links);
+public record SourcePost(long Id, string Url, string Text, string[] Links, DateTimeOffset? PublishedUtc = null);
 public record Rewrite(bool Relevant, string Text, string ReviewNotes);
 public record Draft(SourcePost Source, string Text = "", string Notes = "", int Revision = 1);
 public record StoredDraft(long Id, string State, Draft Draft, string? Error);
 
 public static class PostRules
 {
-    public static string Publication(Draft draft) => $"{draft.Text.Trim()}\n\nИсточник: {draft.Source.Url}";
+    public static string Publication(Draft draft) => draft.Text.Trim();
     public static void Validate(Rewrite result, SourcePost source)
     {
         if (!result.Relevant) return;

@@ -90,7 +90,8 @@ public sealed class Runner(Settings settings, Store store, TelegramSource source
         store.Set(budgetKey, (count + 1).ToString());
         try
         {
-            var rewrite = await ai.Rewrite(row.Draft.Source, ct);
+            var usageId = store.BeginUsage(row.Id, row.Draft.Revision, settings.Model);
+            var rewrite = await ai.Rewrite(row.Draft.Source, ct, report => store.CompleteUsage(usageId, report));
             var draft = row.Draft with { Text = rewrite.Text, Notes = rewrite.ReviewNotes };
             store.Save(row.Id, rewrite.Relevant ? "Ready" : "Skipped", draft);
             Console.WriteLine($"Пост {row.Id}: {(rewrite.Relevant ? "черновик готов" : "не по теме")}.");

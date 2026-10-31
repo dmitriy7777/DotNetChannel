@@ -7,3 +7,6 @@ data/
 publish/
 .env
 TestResults/
+
+portable/
+**/__pycache__/

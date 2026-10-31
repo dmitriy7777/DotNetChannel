@@ -56,7 +56,7 @@ public sealed class PipelineTests : IDisposable
     [Fact]
     public void OversizedRewriteIsBlocked()
     {
-        Assert.Throws<InvalidDataException>(() => PostRules.Validate(new(true, new string('x', 3900), ""), Post));
+        Assert.Throws<InvalidDataException>(() => PostRules.Validate(new(true, new string('x', 3901), ""), Post));
     }
 
     [Fact]

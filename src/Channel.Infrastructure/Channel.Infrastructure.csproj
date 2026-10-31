@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Channel.Core\Channel.Core.csproj" />
@@ -15,4 +15,5 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+<ItemGroup><EmbeddedResource Include="Localization\*.json" /></ItemGroup>
 </Project>

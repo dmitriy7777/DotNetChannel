@@ -25,11 +25,17 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        root = LocateRoot(); InitializeComponent();
+        root = LocateRoot(); LoadLanguagePreference(); InitializeComponent(); LanguagePicker.SelectedIndex = uiLanguage == "ru" ? 1 : 0; Language = System.Windows.Markup.XmlLanguage.GetLanguage(UiText.Culture(uiLanguage).Name); InitializeArchive();
         AddShortcut(Key.F5, RefreshClick); AddShortcut(Key.F6, StartClick); AddShortcut(Key.F7, StopClick); AddShortcut(Key.F8, RestartClick);
-        StartButton.ToolTip = "Запустить сервис (F6)"; StopButton.ToolTip = "Штатно остановить сервис (F7)"; RestartButton.ToolTip = "Перезапустить сервис (F8)";
+        SetControlTooltips();
+        var languageCommand = new RoutedCommand();
+        CommandBindings.Add(new CommandBinding(languageCommand, (_, _) => LanguagePicker.SelectedIndex = LanguagePicker.SelectedIndex == 0 ? 1 : 0));
+        InputBindings.Add(new KeyBinding(languageCommand, new KeyGesture(Key.L, ModifierKeys.Control | ModifierKeys.Shift)));
+        LanguagePicker.ToolTip = "Ctrl+Shift+L";
         timer.Tick += async (_, _) => await Refresh();
         Loaded += async (_, _) => { loaded = true; await Refresh(); timer.Start(); await LoadTelegram();
+            if (Environment.GetCommandLineArgs().Contains("--archive-preview")) { ArchiveTab.IsSelected = true; await ScanArchive(); }
+            if (Environment.GetCommandLineArgs().Contains("--usage-preview")) UsageTab.IsSelected = true;
             if (Environment.GetCommandLineArgs().Contains("--snapshot")) await Dispatcher.InvokeAsync(SavePreview, DispatcherPriority.ContextIdle);
         };
         Closed += (_, _) => { timer.Stop(); http.Dispose(); };
@@ -46,23 +52,23 @@ public partial class MainWindow : Window
                 var settings = Settings.Load(root); var control = new ServiceController(root, settings.DataDirectory);
                 return (Settings: settings, Control: control, State: control.Read(), Snapshot: DashboardReader.Read(settings, DateTimeOffset.UtcNow), Logs: ReadLogs(settings));
             });
-            controller = data.Control; var state = data.State; snapshot = data.Snapshot;
+            controller = data.Control; var state = data.State; snapshot = data.Snapshot with { Posts = data.Snapshot.Posts.Select(p => p with { Status = T(p.Status) }).ToArray() };
             var running = state.ProcessId is not null;
             var stale = running && (state.Heartbeat is null || DateTimeOffset.UtcNow - state.Heartbeat > TimeSpan.FromSeconds(10));
-            ServiceTitle.Text = busy ? "Выполняется команда…" : running ? stale ? "Процесс запущен · сигнал устарел" : "Сервис работает" : "Сервис остановлен";
+            ServiceTitle.Text = busy ? T("Выполняется команда…") : running ? stale ? T("Процесс запущен · сигнал устарел") : T("Сервис работает") : T("Сервис остановлен");
             StateDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? stale ? "#E3A037" : "#18A77B" : "#94A3B8"));
             var uptime = state.Started is { } start ? FormatUptime(DateTimeOffset.UtcNow - start) : "—";
-            ServiceDetails.Text = $"{(running ? $"PID {state.ProcessId} · в работе {uptime}" : "Обработка новых постов приостановлена")} · Задача Windows: {state.TaskState} · Автозапуск: {(state.AutoStart ? "включён" : "выключен")}";
+            ServiceDetails.Text = T("{0} · Задача Windows: {1} · Автозапуск: {2}", running ? T("PID {0} · в работе {1}", state.ProcessId, uptime) : T("Обработка новых постов приостановлена"), T(state.TaskState), T(state.AutoStart ? "включён" : "выключен"));
             var sourceError = snapshot.Meta.GetValueOrDefault("sourceError");
-            SourceHealth.Text = !string.IsNullOrWhiteSpace(sourceError) ? "Источник: " + sourceError : "Последнее успешное чтение: " + FormatTime(snapshot.Meta.GetValueOrDefault("sourcePollUtc")) + " · Сигнал процесса: " + (state.Heartbeat is { } h ? FormatTime(h.ToString("O")) : "нет данных");
-            ChannelSummary.Text = $"{snapshot.Target}  ←  @{snapshot.Source}  ·  {(snapshot.AutoPublish ? "Автопубликация" : "Согласование в Telegram")}";
+            SourceHealth.Text = !string.IsNullOrWhiteSpace(sourceError) ? T("Источник: {0}", ErrorText(sourceError)) : T("Последнее успешное чтение: {0} · Сигнал процесса: {1}", FormatTime(snapshot.Meta.GetValueOrDefault("sourcePollUtc")), state.Heartbeat is { } h ? FormatTime(h.ToString("O")) : T("нет данных"));
+            ChannelSummary.Text = $"{snapshot.Target}  ←  @{snapshot.Source}  ·  {(snapshot.AutoPublish ? T("Автопубликация") : T("Согласование в Telegram"))}";
             PublishedCount.Text = snapshot.Posts.Count(p => p.State == "Published").ToString();
             QueueCount.Text = snapshot.Posts.Count(p => p.State is "Pending" or "Processing" or "Ready" or "Publishing" or "Notifying" or "Review").ToString();
-            ReviewCount.Text = "на согласовании: " + snapshot.Posts.Count(p => p.State == "Review");
+            ReviewCount.Text = T("на согласовании: {0}", snapshot.Posts.Count(p => p.State == "Review"));
             IssueCount.Text = snapshot.Posts.Count(p => p.State is "Failed" or "Uncertain").ToString();
             AiUsage.Text = $"{snapshot.AttemptsToday} / {snapshot.Limit}";
-            ConfigurationText.Text = $"Канал: {snapshot.Target}\nДонор: @{snapshot.Source}\nМодель ИИ: {snapshot.Model}\nРежим: {(snapshot.AutoPublish ? "автоматическая публикация" : "проверка черновиков владельцем")}\nИнтервал чтения: {snapshot.PollSeconds} секунд\nЛимит: {snapshot.Limit} попыток генерации в сутки UTC\nПрочитано до ID: {snapshot.Meta.GetValueOrDefault("cursor", "—")}\nПропущено материалов: {snapshot.Posts.Count(p => p.State == "Skipped")}\nДанные: {data.Settings.DataDirectory}";
-            var nextKey = string.Join('|', snapshot.Posts.Select(p => $"{p.Id}:{p.State}:{p.Draft.Revision}:{p.Error}"));
+            ConfigurationText.Text = T("Канал: {0}\nДонор: @{1}\nМодель ИИ: {2}\nРежим: {3}\nИнтервал чтения: {4} секунд\nЛимит: {5} попыток генерации в сутки UTC\nПрочитано до ID: {6}\nПропущено материалов: {7}\nДанные: {8}", snapshot.Target, snapshot.Source, snapshot.Model, T(snapshot.AutoPublish ? "автоматическая публикация" : "проверка черновиков владельцем"), snapshot.PollSeconds, snapshot.Limit, snapshot.Meta.GetValueOrDefault("cursor", "—"), snapshot.Posts.Count(p => p.State == "Skipped"), data.Settings.DataDirectory);
+            var nextKey = string.Join('|', snapshot.Posts.Select(p => $"{p.Id}:{p.State}:{p.Draft.Revision}:{p.Error}:{p.TokenUsage?.TotalTokens}:{p.TokenUsage?.RecordedAttempts}:{p.TokenUsage?.Attempts}"));
             if (nextKey != rowsKey || PostsGrid.ItemsSource is null) { rowsKey = nextKey; ApplyFilter(); }
             if (LogText.Text != data.Logs)
             {
@@ -70,9 +76,10 @@ public partial class MainWindow : Window
                 LogText.Text = data.Logs; if (follow) LogText.ScrollToEnd(); else LogText.ScrollToVerticalOffset(offset);
             }
             StartButton.IsEnabled = !busy && !running; StopButton.IsEnabled = !busy && (running || state.TaskState is "Работает" or "Ожидание запуска"); RestartButton.IsEnabled = !busy;
-            Footer.Text = state.Error ?? $"Обновлено {TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Kyiv):HH:mm:ss} · автообновление каждые 3 с · закрытие окна не останавливает сервис";
+            RefreshUsage();
+            Footer.Text = state.Error is { } error ? ErrorText(error) : T("Обновлено {0} · автообновление каждые 3 с · закрытие окна не останавливает сервис", TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Kyiv).ToString("HH:mm:ss"));
         }
-        catch (Exception e) { Footer.Text = "Не удалось обновить: " + e.Message; }
+        catch (Exception e) { Footer.Text = T("Не удалось обновить: ") + ErrorText(e.Message); }
         finally { refreshing = false; }
     }
 
@@ -80,9 +87,9 @@ public partial class MainWindow : Window
     {
         if (busy || controller is null) return;
         busy = true; StartButton.IsEnabled = StopButton.IsEnabled = RestartButton.IsEnabled = false;
-        ServiceTitle.Text = "Выполняется команда…";
-        try { await Task.Run(command); Footer.Text = success; }
-        catch (Exception e) { MessageBox.Show(this, e.Message, "Управление сервисом", MessageBoxButton.OK, MessageBoxImage.Information); }
+        ServiceTitle.Text = T("Выполняется команда…");
+        try { await Task.Run(command); Footer.Text = T(success); }
+        catch (Exception e) { MessageBox.Show(this, ErrorText(e.Message), T("Управление сервисом"), MessageBoxButton.OK, MessageBoxImage.Information); }
         finally { busy = false; await Refresh(); }
     }
     private async void StartClick(object sender, RoutedEventArgs e) => await Control(() => controller.Start(), "Сервис запущен.");
@@ -104,23 +111,24 @@ public partial class MainWindow : Window
     private void FilterChanged(object sender, RoutedEventArgs e) { if (loaded) ApplyFilter(); }
     private void PostSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (PostsGrid.SelectedItem is not PostOverview p) { DraftText.Text = "Выберите публикацию слева."; OriginalText.Text = NotesText.Text = ""; return; }
-        DraftText.Text = string.IsNullOrWhiteSpace(p.Draft.Text) ? "Результат ещё не подготовлен." : p.Draft.Text;
+        if (PostsGrid.SelectedItem is not PostOverview p) { DraftText.Text = T("Выберите публикацию слева."); OriginalText.Text = NotesText.Text = ""; return; }
+        DraftText.Text = string.IsNullOrWhiteSpace(p.Draft.Text) ? T("Результат ещё не подготовлен.") : p.Draft.Text;
         OriginalText.Text = p.Draft.Source.Text;
-        NotesText.Text = $"Состояние: {p.Status}\nВерсия: {p.Draft.Revision}\n\n{p.Draft.Notes}\n\n{p.Error}";
+        NotesText.Text = T("Состояние: {0}\nВерсия: {1}\n\n{2}\n\n{3}", p.Status, p.Draft.Revision, p.Draft.Notes, p.Error is { } error ? ErrorText(error) : "");
+        RefreshSelectedUsage();
     }
 
     private async Task LoadTelegram()
     {
-        if (telegramBusy) return; telegramBusy = true; TelegramInfo.Text = "Запрашиваем данные канала…";
+        if (telegramBusy) return; telegramBusy = true; TelegramInfo.Text = T("Запрашиваем данные канала…");
         try
         {
             var settings = Settings.Load(root); var bot = new TelegramBot(http, settings.BotToken);
             var info = await bot.Call("getChat", new { chat_id = settings.TargetChannel }, default);
             var members = await bot.Call("getChatMemberCount", new { chat_id = settings.TargetChannel }, default);
-            TelegramInfo.Text = $"Канал: {info.GetProperty("title").GetString()}\nПодписчиков: {members.GetInt32()} (включая бота)\nПроверено: {TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, Kyiv):dd.MM.yyyy HH:mm:ss}";
+            TelegramInfo.Text = T("Канал: {0}\nПодписчиков: {1} (включая бота)\nПроверено: {2}", info.GetProperty("title").GetString(), members.GetInt32(), FormatTime(DateTimeOffset.UtcNow.ToString("O")));
         }
-        catch (Exception e) { TelegramInfo.Text = "Telegram сейчас недоступен: " + e.Message; }
+        catch (Exception e) { TelegramInfo.Text = T("Telegram сейчас недоступен: ") + ErrorText(e.Message); }
         finally { telegramBusy = false; }
     }
     private async void TelegramRefresh(object sender, RoutedEventArgs e) => await LoadTelegram();
@@ -130,12 +138,12 @@ public partial class MainWindow : Window
     private void OpenPrompt(object sender, RoutedEventArgs e) { try { var psi = new ProcessStartInfo("notepad.exe") { UseShellExecute = true }; psi.ArgumentList.Add(Settings.Load(root).PromptFile); Process.Start(psi); } catch (Exception ex) { Footer.Text = ex.Message; } }
     private void OpenLogs(object sender, RoutedEventArgs e) => Open(Path.Combine(Settings.Load(root).DataDirectory, "logs"));
     private void OpenSource(object sender, RoutedEventArgs e) { if (PostsGrid.SelectedItem is PostOverview p) Open(p.Draft.Source.Url); }
-    private void OpenPublication(object sender, RoutedEventArgs e) { if (PostsGrid.SelectedItem is PostOverview { PublicationUrl: { } url }) Open(url); else Footer.Text = "У выбранного поста ещё нет ссылки на публикацию."; }
+    private void OpenPublication(object sender, RoutedEventArgs e) { if (PostsGrid.SelectedItem is PostOverview { PublicationUrl: { } url }) Open(url); else Footer.Text = T("У выбранного поста ещё нет ссылки на публикацию."); }
     private void Open(string destination) { try { Process.Start(new ProcessStartInfo(destination) { UseShellExecute = true }); } catch (Exception e) { Footer.Text = e.Message; } }
 
-    private static string ReadLogs(Settings settings)
+    private string ReadLogs(Settings settings)
     {
-        var directory = Path.Combine(settings.DataDirectory, "logs"); if (!Directory.Exists(directory)) return "Журналов пока нет.";
+        var directory = Path.Combine(settings.DataDirectory, "logs"); if (!Directory.Exists(directory)) return T("Журналов пока нет.");
         var result = new StringBuilder();
         foreach (var file in new DirectoryInfo(directory).GetFiles("*.log").OrderByDescending(f => f.LastWriteTimeUtc).Take(4))
         {
@@ -150,8 +158,8 @@ public partial class MainWindow : Window
         }
         return result.ToString();
     }
-    private static string FormatTime(string? value) => DateTimeOffset.TryParse(value, out var time) ? TimeZoneInfo.ConvertTime(time, Kyiv).ToString("dd.MM HH:mm:ss") : "нет данных";
-    private static string FormatUptime(TimeSpan uptime) => uptime.TotalDays >= 1 ? $"{(int)uptime.TotalDays} д {uptime.Hours} ч" : $"{(int)uptime.TotalHours} ч {uptime.Minutes} мин";
+    private string FormatTime(string? value) => DateTimeOffset.TryParse(value, out var time) ? TimeZoneInfo.ConvertTime(time, Kyiv).ToString(uiLanguage == "ru" ? "dd.MM HH:mm:ss" : "dd MMM HH:mm:ss", UiText.Culture(uiLanguage)) : T("нет данных");
+    private string FormatUptime(TimeSpan uptime) => uptime.TotalDays >= 1 ? T("{0} д {1} ч", (int)uptime.TotalDays, uptime.Hours) : T("{0} ч {1} мин", (int)uptime.TotalHours, uptime.Minutes);
     private void AddShortcut(Key key, RoutedEventHandler handler)
     {
         var command = new RoutedCommand(); CommandBindings.Add(new CommandBinding(command, (s, e) => handler(s, e)));

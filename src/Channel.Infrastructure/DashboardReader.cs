@@ -4,14 +4,15 @@ using Microsoft.Data.Sqlite;
 
 namespace Channel.Infrastructure;
 
-public record PostOverview(long Id, string State, string Status, string Title, Draft Draft, string? Error, string? PublicationUrl);
-public record DashboardSnapshot(IReadOnlyList<PostOverview> Posts, Dictionary<string,string> Meta, int AttemptsToday, int Limit, string Source, string Target, string Model, bool AutoPublish, int PollSeconds);
+public record PostOverview(long Id, string State, string Status, string Title, Draft Draft, string? Error, string? PublicationUrl, PostTokenUsage? TokenUsage = null)
+{ public string TokensDisplay => TokenUsage is { RecordedAttempts: > 0 } u ? u.TotalTokens.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + (u.Attempts > u.RecordedAttempts ? "+" : "") : "—"; }
+public record DashboardSnapshot(IReadOnlyList<PostOverview> Posts, Dictionary<string,string> Meta, int AttemptsToday, int Limit, string Source, string Target, string Model, bool AutoPublish, int PollSeconds, TokenUsageOverview? TokenUsage = null);
 
 public static class DashboardReader
 {
     public static DashboardSnapshot Read(Settings settings, DateTimeOffset now)
     {
-        var posts = new List<PostOverview>(); var meta = new Dictionary<string,string>();
+        var posts = new List<PostOverview>(); var meta = new Dictionary<string,string>(); TokenUsageOverview? tokenUsage = null;
         var path = Path.Combine(settings.DataDirectory, "channel.db");
         if (File.Exists(path))
         {
@@ -36,10 +37,13 @@ public static class DashboardReader
                     posts.Add(new(id, state, StatusLabel(state), title, draft, reader.IsDBNull(3) ? null : reader.GetString(3), publishedUrl));
                 }
             }
+            int.TryParse(meta.GetValueOrDefault("attempts:" + now.UtcDateTime.ToString("yyyy-MM-dd")), out var attemptsForUsage);
+            tokenUsage = UsageLedger.Read(connection, tx, now, attemptsForUsage, meta.Where(p => p.Key.StartsWith("attempts:")).Sum(p => int.TryParse(p.Value, out var count) ? count : 0));
+            for (var i = 0; i < posts.Count; i++) posts[i] = posts[i] with { TokenUsage = UsageLedger.ForPost(tokenUsage.Entries, posts[i].Id) };
             tx.Commit();
         }
         int.TryParse(meta.GetValueOrDefault("attempts:" + now.UtcDateTime.ToString("yyyy-MM-dd")), out var attempts);
-        return new(posts, meta, attempts, settings.MaxDraftsPerDay, settings.SourceChannel, settings.TargetChannel, settings.Model, settings.AutoPublish, settings.PollSeconds);
+        return new(posts, meta, attempts, settings.MaxDraftsPerDay, settings.SourceChannel, settings.TargetChannel, settings.Model, settings.AutoPublish, settings.PollSeconds, tokenUsage ?? new([], 0, 0, attempts));
     }
 
     public static string StatusLabel(string status) => status switch
